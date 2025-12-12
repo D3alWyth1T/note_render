@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }} - Notes</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav>
+        <a href="/" class="home-link">Home</a>
+        <form action="/search" method="get" class="search-form">
+            <input type="text" name="q" placeholder="Search notes..."
+                   value="{{ request.args.get('q', '') }}">
+            <button type="submit">Search</button>
+        </form>
+    </nav>
+    <div class="container">
+        <aside class="sidebar">
+            <h3>Recent Notes</h3>
+            <ul>
+                {% for note in recent_notes %}
+                <li><a href="{{ note.path }}">{{ note.title }}</a></li>
+                {% endfor %}
+            </ul>
+        </aside>
+        <main>
+            <article>
+                <h1>{{ title }}</h1>
+                {{ content | safe }}
+            </article>
+        </main>
+    </div>
+</body>
+</html>
