@@ -1,6 +1,28 @@
 # Note Display
+<!-- md_toc GFM -->
 
-**v1.0.0**
+* [Note Display](#note-display)
+    * [Features](#features)
+    * [Quick Start](#quick-start)
+    * [Configuration](#configuration)
+        * [Environment Variables](#environment-variables)
+        * [Command-Line Arguments](#command-line-arguments)
+    * [Notes Directory Structure](#notes-directory-structure)
+    * [Supported Features](#supported-features)
+        * [Wiki Links](#wiki-links)
+        * [Images and Static Files](#images-and-static-files)
+        * [Table of Contents](#table-of-contents)
+    * [Integration with Telekasten (Neovim)](#integration-with-telekasten-neovim)
+        * [Clipboard Requirements (Linux)](#clipboard-requirements-linux)
+    * [Running on Startup](#running-on-startup)
+        * [Systemd (Linux)](#systemd-linux)
+        * [Simple Background Process](#simple-background-process)
+    * [Development](#development)
+    * [License](#license)
+
+<!-- md_toc -->
+
+**v1.0.1**
 
 A lightweight Python web server for viewing markdown notes in a browser. Designed to work with note-taking setups like [Telekasten](https://github.com/nvim-telekasten/telekasten.nvim) or [Obsidian](https://obsidian.md/).
 

@@ -10,7 +10,7 @@ Configuration via environment variables or .env file:
     PORT            - Port to run on (default: 5000)
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 import argparse
 import os
@@ -168,7 +168,10 @@ def render_markdown(content: str, current_dir: Path) -> str:
     # Pre-process wiki-links to standard markdown links
     content = preprocess_wiki_links(content, current_dir)
     renderer = HeadingRenderer()
-    markdown = mistune.create_markdown(renderer=renderer)
+    markdown = mistune.create_markdown(
+        renderer=renderer,
+        plugins=["table", "strikethrough"],
+    )
     return markdown(content)
 
 
