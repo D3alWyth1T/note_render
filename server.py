@@ -10,7 +10,7 @@ Configuration via environment variables or .env file:
     PORT            - Port to run on (default: 5000)
 """
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 import argparse
 import os
@@ -80,6 +80,10 @@ class HeadingRenderer(mistune.HTMLRenderer):
         """Render heading with slugified ID for anchor linking."""
         slug = slugify(text)
         return f'<h{level} id="{slug}">{text}</h{level}>\n'
+
+    def softbreak(self) -> str:
+        """Render soft line breaks as HTML breaks for better readability."""
+        return "<br>\n"
 
 
 def get_recent_notes(limit: int = 25) -> list[dict]:

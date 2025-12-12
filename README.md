@@ -22,7 +22,7 @@
 
 <!-- md_toc -->
 
-**v1.0.1**
+**v1.0.2**
 
 A lightweight Python web server for viewing markdown notes in a browser. Designed to work with note-taking setups like [Telekasten](https://github.com/nvim-telekasten/telekasten.nvim) or [Obsidian](https://obsidian.md/).
 
