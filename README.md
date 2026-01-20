@@ -42,7 +42,7 @@ A lightweight Python web server for viewing markdown notes in a browser. Designe
 ```bash
 # Clone the repository
 git clone https://github.com/D3alWyth1T/note_render.git
-cd note_display
+cd note_render
 
 # Create and activate virtual environment
 python3 -m venv .venv
@@ -175,8 +175,8 @@ Description=Note Display Server
 
 [Service]
 Type=simple
-WorkingDirectory=/path/to/note_display
-ExecStart=/path/to/note_display/.venv/bin/python server.py
+WorkingDirectory=/path/to/note_render
+ExecStart=/path/to/note_render/.venv/bin/python server.py
 Restart=on-failure
 
 [Install]
@@ -192,7 +192,7 @@ systemctl --user start note-display
 ### Simple Background Process
 
 ```bash
-/path/to/note_display/.venv/bin/python /path/to/note_display/server.py &
+/path/to/note_render/.venv/bin/python /path/to/note_render/server.py &
 ```
 
 ## Development

@@ -38,14 +38,20 @@ nav {
     z-index: 100;
 }
 
-.home-link {
+.nav-links {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+}
+
+.nav-link {
     color: var(--accent);
     text-decoration: none;
     font-weight: 600;
     font-size: 1.1rem;
 }
 
-.home-link:hover {
+.nav-link:hover {
     color: var(--accent-hover);
 }
 
@@ -158,6 +164,7 @@ h1, h2, h3, h4, h5, h6 {
     margin-top: 1.5rem;
     margin-bottom: 0.75rem;
     color: var(--text-primary);
+    scroll-margin-top: 5rem; /* Offset for sticky nav when jumping to anchors */
 }
 
 h2 { font-size: 1.5rem; }
@@ -252,4 +259,246 @@ article ul li small {
     font-family: monospace;
     white-space: pre-wrap;
     word-break: break-word;
+}
+
+/* Task list checkboxes */
+.task-list-item {
+    list-style-type: none;
+    margin-left: -1.5rem;
+}
+
+.task-list-item-checkbox {
+    margin-right: 0.5rem;
+    cursor: pointer;
+    width: 1rem;
+    height: 1rem;
+    accent-color: var(--accent);
+}
+
+.task-list-item-checkbox:hover {
+    transform: scale(1.1);
+}
+
+/* Navigation actions */
+.nav-actions {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+
+.nav-button {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+.nav-button:hover {
+    background-color: var(--bg-secondary);
+    border-color: var(--accent);
+}
+
+/* Hidden utility class */
+.hidden {
+    display: none !important;
+}
+
+/* Editor styles */
+#note-editor {
+    width: 100%;
+}
+
+.editor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.editor-header h1 {
+    margin: 0;
+    border: none;
+    padding: 0;
+}
+
+.editor-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.editor-button {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.editor-button:hover {
+    background-color: var(--code-bg);
+}
+
+.editor-button.primary {
+    background-color: var(--accent);
+    color: var(--bg-primary);
+    border-color: var(--accent);
+    font-weight: 600;
+}
+
+.editor-button.primary:hover {
+    background-color: var(--accent-hover);
+}
+
+#editor-textarea {
+    width: 100%;
+    min-height: 500px;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background-color: var(--code-bg);
+    color: var(--text-primary);
+    font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    resize: vertical;
+}
+
+#editor-textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+/* Collapsible headers */
+.header-toggle {
+    display: inline-block;
+    width: 1.2rem;
+    margin-right: 0.4rem;
+    font-size: 0.7em;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+    vertical-align: middle;
+}
+
+.header-toggle:hover {
+    color: var(--accent);
+}
+
+article h2,
+article h3,
+article h4,
+article h5,
+article h6 {
+    cursor: pointer;
+}
+
+article h2:hover,
+article h3:hover,
+article h4:hover,
+article h5:hover,
+article h6:hover {
+    color: var(--accent);
+}
+
+h2.collapsed,
+h3.collapsed,
+h4.collapsed,
+h5.collapsed,
+h6.collapsed {
+    opacity: 0.7;
+}
+
+.section-hidden {
+    display: none !important;
+}
+
+/* Local Graph Panel */
+.local-graph-panel {
+    position: fixed;
+    top: 60px;
+    right: 0;
+    width: 350px;
+    height: calc(100vh - 60px);
+    background-color: var(--bg-secondary);
+    border-left: 1px solid var(--border);
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.3s ease;
+}
+
+.local-graph-panel.hidden {
+    transform: translateX(100%);
+}
+
+.local-graph-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.local-graph-close {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 1.5rem;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0;
+}
+
+.local-graph-close:hover {
+    color: var(--text-primary);
+}
+
+#local-graph-container {
+    flex: 1;
+    overflow: hidden;
+}
+
+#local-graph-container svg {
+    width: 100%;
+    height: 100%;
+}
+
+.local-graph-panel .node circle {
+    fill: var(--accent);
+    stroke: var(--bg-primary);
+    stroke-width: 2px;
+    cursor: pointer;
+}
+
+.local-graph-panel .node.current circle {
+    fill: var(--accent-hover);
+    stroke: var(--text-primary);
+    stroke-width: 3px;
+}
+
+.local-graph-panel .node:hover circle {
+    fill: var(--accent-hover);
+}
+
+.local-graph-panel .node text {
+    fill: var(--text-primary);
+    font-size: 11px;
+    pointer-events: none;
+}
+
+.local-graph-panel .link {
+    stroke: var(--border);
+    stroke-opacity: 0.8;
+    stroke-width: 1.5px;
 }

@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Graph - Notes</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        :root {
+            --bg-primary: #1e1e2e;
+            --bg-secondary: #2a2a3e;
+            --text-primary: #cdd6f4;
+            --text-secondary: #a6adc8;
+            --accent: #89b4fa;
+            --accent-hover: #b4befe;
+            --border: #45475a;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            overflow: hidden;
+        }
+
+        nav {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            padding: 1rem 2rem;
+            background-color: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+        }
+
+        nav a {
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+
+        nav a:hover {
+            color: var(--accent-hover);
+        }
+
+        nav a.active {
+            color: var(--text-primary);
+        }
+
+        #graph-container {
+            width: 100vw;
+            height: 100vh;
+            padding-top: 60px;
+        }
+
+        svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .node {
+            cursor: pointer;
+        }
+
+        .node circle {
+            fill: var(--accent);
+            stroke: var(--bg-secondary);
+            stroke-width: 2px;
+            transition: fill 0.2s;
+        }
+
+        .node:hover circle {
+            fill: var(--accent-hover);
+        }
+
+        .node text {
+            fill: var(--text-primary);
+            font-size: 10px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .node:hover text {
+            opacity: 1;
+        }
+
+        .link {
+            stroke: var(--border);
+            stroke-opacity: 0.6;
+            stroke-width: 1px;
+        }
+
+        .tooltip {
+            position: absolute;
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 0.5rem 0.75rem;
+            font-size: 0.85rem;
+            color: var(--text-primary);
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 200;
+        }
+
+        .tooltip.visible {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="/">Home</a>
+        <a href="/graph" class="active">Graph</a>
+    </nav>
+    <div id="graph-container"></div>
+    <div class="tooltip" id="tooltip"></div>
+
+    <script>
+        const container = document.getElementById('graph-container');
+        const tooltip = document.getElementById('tooltip');
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+
+        const svg = d3.select('#graph-container')
+            .append('svg')
+            .attr('width', width)
+            .attr('height', height);
+
+        // Add zoom behavior
+        const g = svg.append('g');
+        const zoom = d3.zoom()
+            .scaleExtent([0.1, 4])
+            .on('zoom', (event) => {
+                g.attr('transform', event.transform);
+            });
+        svg.call(zoom);
+
+        // Fetch graph data and render
+        fetch('/api/graph-data')
+            .then(response => response.json())
+            .then(data => {
+                renderGraph(data);
+            })
+            .catch(error => {
+                console.error('Error loading graph data:', error);
+            });
+
+        function renderGraph(data) {
+            const nodes = data.nodes;
+            const links = data.edges;
+
+            // Calculate node sizes based on connections
+            const minRadius = 5;
+            const maxRadius = 25;
+            const maxConnections = Math.max(...nodes.map(n => n.connections), 1);
+            nodes.forEach(node => {
+                node.radius = minRadius + (node.connections / maxConnections) * (maxRadius - minRadius);
+            });
+
+            // Create force simulation
+            const simulation = d3.forceSimulation(nodes)
+                .force('link', d3.forceLink(links).id(d => d.id).distance(80))
+                .force('charge', d3.forceManyBody().strength(-200))
+                .force('center', d3.forceCenter(width / 2, height / 2))
+                .force('collision', d3.forceCollide().radius(d => d.radius + 5));
+
+            // Draw links
+            const link = g.append('g')
+                .selectAll('line')
+                .data(links)
+                .join('line')
+                .attr('class', 'link');
+
+            // Draw nodes
+            const node = g.append('g')
+                .selectAll('g')
+                .data(nodes)
+                .join('g')
+                .attr('class', 'node')
+                .call(d3.drag()
+                    .on('start', dragstarted)
+                    .on('drag', dragged)
+                    .on('end', dragended));
+
+            node.append('circle')
+                .attr('r', d => d.radius);
+
+            node.append('text')
+                .attr('dx', d => d.radius + 5)
+                .attr('dy', 4)
+                .text(d => d.label);
+
+            // Node interactions
+            node.on('click', (event, d) => {
+                window.location.href = d.path;
+            });
+
+            node.on('mouseover', (event, d) => {
+                tooltip.textContent = d.label + ' (' + d.connections + ' connections)';
+                tooltip.classList.add('visible');
+            });
+
+            node.on('mousemove', (event) => {
+                tooltip.style.left = (event.pageX + 10) + 'px';
+                tooltip.style.top = (event.pageY - 10) + 'px';
+            });
+
+            node.on('mouseout', () => {
+                tooltip.classList.remove('visible');
+            });
+
+            // Update positions on simulation tick
+            simulation.on('tick', () => {
+                link
+                    .attr('x1', d => d.source.x)
+                    .attr('y1', d => d.source.y)
+                    .attr('x2', d => d.target.x)
+                    .attr('y2', d => d.target.y);
+
+                node.attr('transform', d => `translate(${d.x},${d.y})`);
+            });
+
+            // Drag functions
+            function dragstarted(event, d) {
+                if (!event.active) simulation.alphaTarget(0.3).restart();
+                d.fx = d.x;
+                d.fy = d.y;
+            }
+
+            function dragged(event, d) {
+                d.fx = event.x;
+                d.fy = event.y;
+            }
+
+            function dragended(event, d) {
+                if (!event.active) simulation.alphaTarget(0);
+                d.fx = null;
+                d.fy = null;
+            }
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            const newWidth = container.clientWidth;
+            const newHeight = container.clientHeight;
+            svg.attr('width', newWidth).attr('height', newHeight);
+        });
+    </script>
+</body>
+</html>

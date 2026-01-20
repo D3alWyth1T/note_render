@@ -5,31 +5,57 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ title }} - Notes</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
 </head>
 <body>
     <nav>
-        <a href="/" class="home-link">Home</a>
-        <form action="/search" method="get" class="search-form">
-            <input type="text" name="q" placeholder="Search notes..."
-                   value="{{ request.args.get('q', '') }}">
-            <button type="submit">Search</button>
-        </form>
+        <div class="nav-links">
+            <a href="/" class="nav-link">Home</a>
+            <a href="/graph" class="nav-link">Graph</a>
+            <button id="local-graph-toggle" class="nav-button" title="Show local graph">Links</button>
+        </div>
+        <div class="nav-actions">
+            <button id="edit-toggle" class="nav-button" title="Edit note">Edit</button>
+            <form action="/search" method="get" class="search-form">
+                <input type="text" name="q" placeholder="Search notes..."
+                       value="{{ request.args.get('q', '') }}">
+                <button type="submit">Search</button>
+            </form>
+        </div>
     </nav>
+    <div id="local-graph-panel" class="local-graph-panel hidden">
+        <div class="local-graph-header">
+            <span>Linked Notes</span>
+            <button id="local-graph-close" class="local-graph-close">&times;</button>
+        </div>
+        <div id="local-graph-container"></div>
+    </div>
     <div class="container">
         <aside class="sidebar">
-            <h3>Recent Notes</h3>
+            <h3>Tags</h3>
             <ul>
-                {% for note in recent_notes %}
-                <li><a href="{{ note.path }}">{{ note.title }}</a></li>
+                {% for tag in tags %}
+                <li><a href="/search?q=%40{{ tag.name }}">@{{ tag.name }} <small>({{ tag.count }})</small></a></li>
                 {% endfor %}
             </ul>
         </aside>
         <main>
-            <article>
+            <article id="note-view">
                 <h1>{{ title }}</h1>
                 {{ content | safe }}
             </article>
+            <div id="note-editor" class="hidden">
+                <div class="editor-header">
+                    <h1>{{ title }}</h1>
+                    <div class="editor-actions">
+                        <button id="save-note" class="editor-button primary">Save</button>
+                        <button id="cancel-edit" class="editor-button">Cancel</button>
+                    </div>
+                </div>
+                <textarea id="editor-textarea" spellcheck="false"></textarea>
+            </div>
         </main>
     </div>
+    <script src="{{ url_for('static', filename='main.js') }}"></script>
 </body>
 </html>
