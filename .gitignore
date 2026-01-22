@@ -12,6 +12,13 @@ __pycache__/
 # Environment variables
 .env
 
+# Database (user credentials)
+*.db
+*.sqlite
+
+# API documentation (keep local, not needed in public repo)
+API.md
+
 # IDE / Editor
 .idea/
 .vscode/

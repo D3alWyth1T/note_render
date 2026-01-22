@@ -1,24 +1,41 @@
 """
-Note Display Server - A lightweight markdown note viewer.
+Note Display Server - A lightweight markdown note viewer with authentication.
 
 Usage:
-    .venv/bin/python server.py [--port PORT] [--notes-dir PATH]
+    python server.py serve [--port PORT] [--host HOST] [--notes-dir PATH]
+    python server.py adduser <username>
+    python server.py deluser <username>
+    python server.py listusers
+    python server.py apikey-create <username> [--name NAME]
+    python server.py apikey-revoke <prefix>
+    python server.py apikey-list [username]
+
+Authentication:
+    - HTTP Basic Auth (browser login prompt)
+    - API Key via X-API-Key header (for bots/scripts)
 
 Configuration via environment variables or .env file:
     NOTES_DIR       - Path to notes directory (default: ~/notes)
     DEFAULT_NOTE    - Default note to show on homepage (default: homepage)
     PORT            - Port to run on (default: 5000)
+    HOST            - Host to bind to (default: 127.0.0.1)
+    DATABASE_PATH   - Path to user database (default: ~/.note_render/users.db)
 """
 
-__version__ = "1.0.2"
+__version__ = "1.2.0"
 
 import argparse
 import fnmatch
+import getpass
 import os
 import queue
 import re
+import secrets
+import sqlite3
+import sys
 import threading
 import time
+from functools import wraps
 from pathlib import Path
 
 import mistune
@@ -33,6 +50,7 @@ from flask import (
 )
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
+from werkzeug.security import check_password_hash, generate_password_hash
 
 # Load .env file if present
 try:
@@ -53,6 +71,172 @@ GRAPH_EXCLUDE_PATTERNS = [
     for pattern in os.environ.get("GRAPH_EXCLUDE", "").split(",")
     if pattern.strip()
 ]
+DATABASE_PATH = Path(
+    os.environ.get("DATABASE_PATH", "~/.note_render/users.db")
+).expanduser()
+
+
+def init_db() -> None:
+    """Initialize the SQLite database for user authentication."""
+    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS api_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            key_hash TEXT UNIQUE NOT NULL,
+            key_prefix TEXT NOT NULL,
+            name TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """)
+    conn.commit()
+    conn.close()
+    # Set restrictive permissions on database file (owner read/write only)
+    DATABASE_PATH.chmod(0o600)
+
+
+def get_db() -> sqlite3.Connection:
+    """Get a database connection."""
+    return sqlite3.connect(DATABASE_PATH)
+
+
+def check_auth(username: str, password: str) -> bool:
+    """Verify username and password against the database."""
+    if not DATABASE_PATH.exists():
+        return False
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT password_hash FROM users WHERE username = ?", (username,))
+    row = cursor.fetchone()
+    conn.close()
+    if row is None:
+        return False
+    return check_password_hash(row[0], password)
+
+
+def create_api_key(username: str, name: str | None = None) -> str | None:
+    """Create a new API key for a user. Returns the key (only shown once)."""
+    if not DATABASE_PATH.exists():
+        return None
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM users WHERE username = ?", (username,))
+    row = cursor.fetchone()
+    if row is None:
+        conn.close()
+        return None
+
+    user_id = row[0]
+    # Generate a secure random key (32 bytes = 64 hex chars)
+    raw_key = secrets.token_hex(32)
+    key_prefix = raw_key[:8]  # Store prefix for identification
+    key_hash = generate_password_hash(raw_key)
+
+    cursor.execute(
+        "INSERT INTO api_keys (user_id, key_hash, key_prefix, name) VALUES (?, ?, ?, ?)",
+        (user_id, key_hash, key_prefix, name),
+    )
+    conn.commit()
+    conn.close()
+    return raw_key
+
+
+def check_api_key(api_key: str) -> bool:
+    """Verify an API key against the database."""
+    if not DATABASE_PATH.exists() or not api_key:
+        return False
+    conn = get_db()
+    cursor = conn.cursor()
+    # Use prefix to narrow down candidates (optimization)
+    key_prefix = api_key[:8]
+    cursor.execute("SELECT key_hash FROM api_keys WHERE key_prefix = ?", (key_prefix,))
+    rows = cursor.fetchall()
+    conn.close()
+    for (key_hash,) in rows:
+        if check_password_hash(key_hash, api_key):
+            return True
+    return False
+
+
+def revoke_api_key(key_prefix: str) -> bool:
+    """Revoke an API key by its prefix. Returns True if key was found and revoked."""
+    if not DATABASE_PATH.exists():
+        return False
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM api_keys WHERE key_prefix = ?", (key_prefix,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+def list_api_keys(username: str | None = None) -> list[dict]:
+    """List API keys, optionally filtered by username."""
+    if not DATABASE_PATH.exists():
+        return []
+    conn = get_db()
+    cursor = conn.cursor()
+    if username:
+        cursor.execute(
+            """
+            SELECT ak.key_prefix, ak.name, ak.created_at, u.username
+            FROM api_keys ak
+            JOIN users u ON ak.user_id = u.id
+            WHERE u.username = ?
+            ORDER BY ak.created_at DESC
+            """,
+            (username,),
+        )
+    else:
+        cursor.execute("""
+            SELECT ak.key_prefix, ak.name, ak.created_at, u.username
+            FROM api_keys ak
+            JOIN users u ON ak.user_id = u.id
+            ORDER BY u.username, ak.created_at DESC
+            """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {"prefix": r[0], "name": r[1], "created_at": r[2], "username": r[3]}
+        for r in rows
+    ]
+
+
+def requires_auth(f):
+    """Decorator to require HTTP Basic Auth or API key on a route."""
+
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        # Check for API key first (preferred for bots)
+        api_key = request.headers.get("X-API-Key")
+        if api_key and check_api_key(api_key):
+            return f(*args, **kwargs)
+
+        # Fall back to Basic Auth
+        auth = request.authorization
+        if auth and check_auth(auth.username, auth.password):
+            return f(*args, **kwargs)
+
+        return Response(
+            "Authentication required",
+            401,
+            {"WWW-Authenticate": 'Basic realm="Note Render"'},
+        )
+
+    return decorated
+
 
 # SSE clients - thread-safe list of queues for connected clients
 sse_clients: list[queue.Queue] = []
@@ -586,12 +770,14 @@ def search_notes(query: str) -> list[dict]:
 
 
 @app.route("/")
+@requires_auth
 def index():
     """Serve the homepage."""
     return serve_note(DEFAULT_NOTE)
 
 
 @app.route("/search")
+@requires_auth
 def search():
     """Handle search requests."""
     query = request.args.get("q", "").strip()
@@ -627,18 +813,21 @@ def search():
 
 
 @app.route("/graph")
+@requires_auth
 def graph():
     """Serve the graph visualization page."""
     return render_template("graph.html")
 
 
 @app.route("/api/graph-data")
+@requires_auth
 def graph_data():
     """Return graph data as JSON for visualization."""
     return jsonify(build_graph_data())
 
 
 @app.route("/api/local-graph")
+@requires_auth
 def local_graph_data():
     """Return graph data for a specific note and its connections."""
     note_path = request.args.get("path", "").lstrip("/")
@@ -679,6 +868,7 @@ def local_graph_data():
 
 
 @app.route("/api/events")
+@requires_auth
 def sse_events():
     """Server-Sent Events endpoint for live reload."""
 
@@ -719,6 +909,7 @@ def sse_events():
 
 
 @app.route("/<path:note_path>")
+@requires_auth
 def serve_note(note_path: str):
     """Serve a markdown note or static file."""
     # Check if this is a static file request
@@ -794,6 +985,7 @@ def toggle_checkbox_in_content(content: str, checkbox_index: int, checked: bool)
 
 
 @app.route("/api/toggle-checkbox", methods=["POST"])
+@requires_auth
 def toggle_checkbox():
     """Toggle a checkbox in a markdown file."""
     data = request.get_json()
@@ -824,6 +1016,7 @@ def toggle_checkbox():
 
 
 @app.route("/api/get-note-raw", methods=["GET"])
+@requires_auth
 def get_note_raw():
     """Get raw markdown content for editing."""
     note_path = request.args.get("path")
@@ -845,6 +1038,7 @@ def get_note_raw():
 
 
 @app.route("/api/save-note", methods=["POST"])
+@requires_auth
 def save_note():
     """Save edited note content."""
     data = request.get_json()
@@ -871,51 +1065,124 @@ def save_note():
         return jsonify({"error": str(e)}), 500
 
 
-def main():
-    """Main entry point."""
+def cmd_adduser(args: argparse.Namespace) -> None:
+    """Add a new user to the database."""
+    init_db()
+    password = getpass.getpass(f"Password for {args.username}: ")
+    if not password:
+        print("Error: Password cannot be empty")
+        return
+    confirm = getpass.getpass("Confirm password: ")
+    if password != confirm:
+        print("Error: Passwords do not match")
+        return
+
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+            (args.username, generate_password_hash(password)),
+        )
+        conn.commit()
+        print(f"User '{args.username}' created successfully")
+    except sqlite3.IntegrityError:
+        print(f"Error: User '{args.username}' already exists")
+    finally:
+        conn.close()
+
+
+def cmd_deluser(args: argparse.Namespace) -> None:
+    """Delete a user from the database."""
+    if not DATABASE_PATH.exists():
+        print("Error: No users database found")
+        return
+
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM users WHERE username = ?", (args.username,))
+    if cursor.rowcount == 0:
+        print(f"Error: User '{args.username}' not found")
+    else:
+        print(f"User '{args.username}' deleted successfully")
+    conn.commit()
+    conn.close()
+
+
+def cmd_listusers(_args: argparse.Namespace) -> None:
+    """List all users in the database."""
+    if not DATABASE_PATH.exists():
+        print("No users database found")
+        return
+
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT username, created_at FROM users ORDER BY username")
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        print("No users found")
+        return
+
+    print("Users:")
+    for username, created_at in rows:
+        print(f"  - {username} (created: {created_at})")
+
+
+def cmd_apikey_create(args: argparse.Namespace) -> None:
+    """Create a new API key for a user."""
+    init_db()
+    key = create_api_key(args.username, args.name)
+    if key is None:
+        print(f"Error: User '{args.username}' not found")
+        return
+    print(f"API key created for '{args.username}':")
+    print(f"  {key}")
+    print()
+    print("Save this key - it cannot be retrieved again!")
+    print(f"Use with: curl -H 'X-API-Key: {key}' <url>")
+
+
+def cmd_apikey_revoke(args: argparse.Namespace) -> None:
+    """Revoke an API key by its prefix."""
+    if revoke_api_key(args.prefix):
+        print(f"API key with prefix '{args.prefix}' revoked")
+    else:
+        print(f"Error: No API key found with prefix '{args.prefix}'")
+
+
+def cmd_apikey_list(args: argparse.Namespace) -> None:
+    """List API keys."""
+    keys = list_api_keys(args.username if hasattr(args, "username") else None)
+    if not keys:
+        print("No API keys found")
+        return
+    print("API Keys:")
+    for key in keys:
+        name_str = f" ({key['name']})" if key["name"] else ""
+        print(
+            f"  - {key['prefix']}...{name_str} [{key['username']}] created: {key['created_at']}"
+        )
+
+
+def cmd_serve(args: argparse.Namespace) -> None:
+    """Run the note server."""
     global NOTES_DIR, DEFAULT_NOTE, ALLOW_ALL_PATHS  # pylint: disable=global-statement
 
-    default_port = int(os.environ.get("PORT", 5000))
+    # Initialize database if it doesn't exist
+    init_db()
 
-    parser = argparse.ArgumentParser(
-        description="Note Display Server - A lightweight markdown note viewer",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Environment variables (can also be set in .env file):
-  NOTES_DIR        Path to notes directory
-  DEFAULT_NOTE     Default note for homepage
-  PORT             Server port
-  ALLOW_ALL_PATHS  Allow accessing files outside notes directory (DANGEROUS)
-        """,
-    )
-    parser.add_argument(
-        "--version", action="version", version=f"%(prog)s {__version__}"
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=default_port,
-        help=f"Port to run on (default: {default_port})",
-    )
-    parser.add_argument(
-        "--notes-dir",
-        type=Path,
-        default=NOTES_DIR,
-        help=f"Notes directory (default: {NOTES_DIR})",
-    )
-    parser.add_argument(
-        "--default-note",
-        type=str,
-        default=DEFAULT_NOTE,
-        help=f"Default note to show on homepage (default: {DEFAULT_NOTE})",
-    )
-    parser.add_argument(
-        "--allow-all-paths",
-        action="store_true",
-        default=ALLOW_ALL_PATHS,
-        help="Allow accessing files outside notes directory (DANGEROUS)",
-    )
-    args = parser.parse_args()
+    # Check if any users exist
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM users")
+    user_count = cursor.fetchone()[0]
+    conn.close()
+
+    if user_count == 0:
+        print("WARNING: No users exist. Run 'server.py adduser <username>' to add one.")
+        print("         Server will reject all requests until a user is created.")
 
     NOTES_DIR = args.notes_dir.resolve()
     DEFAULT_NOTE = args.default_note
@@ -925,13 +1192,126 @@ Environment variables (can also be set in .env file):
     print(f"Homepage: {DEFAULT_NOTE}")
     if ALLOW_ALL_PATHS:
         print("WARNING: Path traversal protection DISABLED - all files accessible")
-    print(f"Running on http://localhost:{args.port}")
+
+    host = args.host
+    if host != "127.0.0.1":
+        print(f"WARNING: Binding to {host} - ensure you are behind a reverse proxy!")
+
+    print(f"Running on http://{host}:{args.port}")
 
     # Start file watcher for live reload
     start_file_watcher()
     print("Live reload enabled (watching for file changes)")
 
-    app.run(host="127.0.0.1", port=args.port, debug=False)
+    app.run(host=host, port=args.port, debug=False)
+
+
+def main():
+    """Main entry point."""
+    default_port = int(os.environ.get("PORT", 5000))
+    default_host = os.environ.get("HOST", "127.0.0.1")
+
+    parser = argparse.ArgumentParser(
+        description="Note Display Server - A lightweight markdown note viewer",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Environment variables (can also be set in .env file):
+  NOTES_DIR        Path to notes directory
+  DEFAULT_NOTE     Default note for homepage
+  PORT             Server port
+  HOST             Host to bind to (default: 127.0.0.1)
+  DATABASE_PATH    Path to user database (default: ~/.note_render/users.db)
+  ALLOW_ALL_PATHS  Allow accessing files outside notes directory (DANGEROUS)
+        """,
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
+    )
+
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # serve command (default)
+    serve_parser = subparsers.add_parser("serve", help="Run the note server")
+    serve_parser.add_argument(
+        "--port",
+        type=int,
+        default=default_port,
+        help=f"Port to run on (default: {default_port})",
+    )
+    serve_parser.add_argument(
+        "--host",
+        type=str,
+        default=default_host,
+        help=f"Host to bind to (default: {default_host})",
+    )
+    serve_parser.add_argument(
+        "--notes-dir",
+        type=Path,
+        default=NOTES_DIR,
+        help=f"Notes directory (default: {NOTES_DIR})",
+    )
+    serve_parser.add_argument(
+        "--default-note",
+        type=str,
+        default=DEFAULT_NOTE,
+        help=f"Default note to show on homepage (default: {DEFAULT_NOTE})",
+    )
+    serve_parser.add_argument(
+        "--allow-all-paths",
+        action="store_true",
+        default=ALLOW_ALL_PATHS,
+        help="Allow accessing files outside notes directory (DANGEROUS)",
+    )
+    serve_parser.set_defaults(func=cmd_serve)
+
+    # adduser command
+    adduser_parser = subparsers.add_parser("adduser", help="Add a new user")
+    adduser_parser.add_argument("username", help="Username to add")
+    adduser_parser.set_defaults(func=cmd_adduser)
+
+    # deluser command
+    deluser_parser = subparsers.add_parser("deluser", help="Delete a user")
+    deluser_parser.add_argument("username", help="Username to delete")
+    deluser_parser.set_defaults(func=cmd_deluser)
+
+    # listusers command
+    listusers_parser = subparsers.add_parser("listusers", help="List all users")
+    listusers_parser.set_defaults(func=cmd_listusers)
+
+    # apikey create command
+    apikey_create_parser = subparsers.add_parser(
+        "apikey-create", help="Create an API key for a user"
+    )
+    apikey_create_parser.add_argument("username", help="Username to create key for")
+    apikey_create_parser.add_argument(
+        "--name", "-n", help="Optional name/description for the key"
+    )
+    apikey_create_parser.set_defaults(func=cmd_apikey_create)
+
+    # apikey revoke command
+    apikey_revoke_parser = subparsers.add_parser(
+        "apikey-revoke", help="Revoke an API key"
+    )
+    apikey_revoke_parser.add_argument(
+        "prefix", help="First 8 characters of the key to revoke"
+    )
+    apikey_revoke_parser.set_defaults(func=cmd_apikey_revoke)
+
+    # apikey list command
+    apikey_list_parser = subparsers.add_parser("apikey-list", help="List API keys")
+    apikey_list_parser.add_argument(
+        "username", nargs="?", help="Optional: filter by username"
+    )
+    apikey_list_parser.set_defaults(func=cmd_apikey_list)
+
+    args = parser.parse_args()
+
+    # Default to serve if no command specified
+    if args.command is None:
+        # Re-parse with serve as default
+        args = parser.parse_args(["serve"] + sys.argv[1:])
+
+    args.func(args)
 
 
 if __name__ == "__main__":
